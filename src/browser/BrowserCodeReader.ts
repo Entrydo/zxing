@@ -111,11 +111,12 @@ export class BrowserCodeReader {
      *
      * @param {string} [deviceId] the id of one of the devices obtained after calling getVideoInputDevices. Can be undefined, in this case it will decode from one of the available devices, preffering the main camera (environment facing) if available.
      * @param {(string|HTMLVideoElement)} [videoElement] the video element in page where to show the video while decoding. Can be either an element id or directly an HTMLVideoElement. Can be undefined, in which case no video will be shown.
+     * @param torch
      * @returns {Promise<Result>} The decoding result.
      *
      * @memberOf BrowserCodeReader
      */
-    public decodeFromInputVideoDevice(deviceId?: string, videoElement?: string | HTMLVideoElement): Promise<Result> {
+    public decodeFromInputVideoDevice(deviceId?: string, videoElement?: string | HTMLVideoElement, torch?: boolean): Promise<Result> {
         this.reset();
 
         this.prepareVideoElement(videoElement);
@@ -138,7 +139,7 @@ export class BrowserCodeReader {
             };
 
             navigator.mediaDevices.getUserMedia(constraints)
-                .then((stream: MediaStream) => this.startDecodeFromStream(stream, callback))
+                .then((stream: MediaStream) => this.startDecodeFromStream(stream, callback, torch))
                 .catch((error) => reject(error));
         });
     }
@@ -149,10 +150,27 @@ export class BrowserCodeReader {
      * @param stream The stream to be shown in the video element.
      * @param callbackFn A callback for the decode method.
      *
+     * @param torch
      * @todo Return Promise<Result>
      */
-    protected startDecodeFromStream(stream: MediaStream, callbackFn?: (...args: any[]) => any): void {
+    protected startDecodeFromStream(stream: MediaStream, callbackFn?: (...args: any[]) => any, torch?: boolean): void {
         this.stream = stream;
+
+        const track = stream.getVideoTracks()[0];
+
+        // @ts-ignore
+        const imageCapture = new ImageCapture(track);
+        const photoCapabilities = imageCapture.getPhotoCapabilities().then(capabilities => {
+
+            if(capabilities.fillLightMode.indexOf('flash') > -1) {
+                track.applyConstraints({
+                    // @ts-ignore
+                    advanced: [{ torch: !!torch }]
+                });
+            }
+
+        });
+
         this.bindVideoSrc(this.videoElement, stream);
         this.bindEvents(this.videoElement, callbackFn);
     }
@@ -424,10 +442,17 @@ export class BrowserCodeReader {
      */
     protected stopStreams(): void {
 
-    if (this.stream) {
-        this.stream.getVideoTracks().forEach(t => t.stop());
-        this.stream = undefined;
-      }
+        if (this.stream) {
+            const track = this.stream.getVideoTracks()[0];
+
+            track.applyConstraints({
+                // @ts-ignore
+                advanced: [{ torch: false }]
+            });
+
+            this.stream.getVideoTracks().forEach(t => t.stop());
+            this.stream = undefined;
+        }
 
     }
 
